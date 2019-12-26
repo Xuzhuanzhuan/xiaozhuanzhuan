@@ -1,0 +1,421 @@
+IO_ADDRESS  EQU 288H
+IO_ADDRESS EQU 288H
+a8255 EQU  288H      ;8255A口
+b8255 EQU 289H      ;8255B口
+c8255 EQU 28AH      ;8255C口
+k8255 EQU 28BH     ;8255控制口
+DATA SEGMENT
+HUANCH DW  0D6D8H,0C1BFH,0A3BAH,0C1A6H,0A1C3H,0A3AEH,0A3CBH,0BDEFH    ;重量：-.-斤
+DW 0BCDBH,0B8F1H,0A3BAH,0A3B0H,0A3AEH,0A3B0H,0A1A0H,0D4AAH            ;价格：--元
+DW 0D7DCH,0BCDBH,0A3BAH,0A3AEH,0A3AEH,0A3AEH,0A3AEH,0D4AAH                 ;总价：--元
+DW 0B3F6H,0C6B7H,0C8CBH,0A3BAH,0D0ECH,0D7AAH,0D7AAH,0A1EFH                 ;出品人：徐转转
+DW 64,66,68,0,72
+PRICE DW 10,11,12,13,14,15,16,17,18
+CC DB 10      ;表示0-9这10 个数字
+HZ_ADR  DB ?
+table1 DW 0770H,0B70H,0D70H,0E70H,07B0H,0BB0H,0DB0H,0EB0H    ;PC0对列0，PC3对列3，PC4对行0，PC7对行3
+DW 07D0H,0BD0H,07E0H      ;键盘扫描码表
+char  DB  '0123456789C'                ;键盘表上所表示的字符
+DATA ENDS
+
+STACKS SEGMENT STACK          ;堆栈空间
+DB 100 DUP (?)
+STACKS ENDS
+
+CODE SEGMENT
+ASSUME CS:CODE,DS:DATA,SS:STACKS,ES:DATA
+START:
+CLI
+MOV AX,DATA
+MOV DS,AX
+MOV ES,AX
+MOV AX,STACKS
+MOV SS,AX
+MOV DX,k8255           ;8255初始化
+MOV AL,81H             ;8255控制字
+OUT DX,AL
+CALL TRANSFORM         ;调用0809进行模数转化
+CALL CLEAR             ;LCD清屏
+LEA BX,HUANCH
+MOV CH,1               ;显示第一行
+CALL LCD_DISP
+
+MOV AX,[HUANCH+6]                                                                                                                                                                    
+CMP AX,0A3B5H
+JNZ NOTOUT
+CALL FENGMINGQI   
+
+NOTOUT:
+CALL JISUAN
+LEA BX,HUANCH
+MOV CH,2               ;显示第二行
+CALL LCD_DISP
+LEA BX,HUANCH
+MOV CH,3              ;显示第三行
+CALL LCD_DISP
+LEA BX,HUANCH
+MOV CH,4              ;显示第四行
+CALL LCD_DISP
+
+MOV DX,c8255
+MOV AL,0FH
+OUT DX,AL
+IN AL,DX              ;读行扫描值
+AND AL,0FH
+CMP AL,0FH
+JZ START              ;未发现有键按下则转
+MOV DL,3FH            ;发现有键按下
+MOV AH,2
+INT 21H
+CALL JIANPAN
+MOV DL,[CC]
+ADD DL,30H
+MOV AH,02
+INT 21H              ;显示查找到的键盘
+MOV BL,[CC]     ;读取到的键盘数字放在寄存器的低八位     
+MOV BH,0         ;寄存器的高八位存放0
+MOV CL,2
+MOV CH,0
+MUL  CX
+
+LEA DX,PRICE       ;不太确定是否有这一行
+MOV AX,[PRICE+CX]            ；在价格表中找到的对应的物品的单价
+MOV DX,0
+MOV CX,10      ;[HUANCH+66]存放价格的个位数字
+DIV CX                    ;获取价格的个位数字
+MOV [HUANCH+66],AX      ;[HUANCH+66]存放价格的个位数字
+ADD AX,0A3B0H
+MOV [HUANCH+22],AX       ;将读取到的键盘数字以汉字的形式显示在第二行
+MOV [HUANCH+68],DX      ;[HUANCH+68]存放价格的十分位数字
+ADD DX,0A3B0H
+MOV [HUANCH+26],DX         ;将读取到的键盘数字以汉字的形式显示在第二行
+MOV BL,10
+MOV AX,[HUANCH+66]
+MOV AH,0
+MUL BL
+ADD AX,[HUANCH+68]
+MOV [HUANCH+70],AX
+MOV DX,k8255       ;8255控制口
+MOV AL,81H         ;8255控制字
+OUT DX,AL
+LEA BX,HUANCH
+MOV CH,2            ;显示第二行信息
+CALL LCD_DISP
+LEA BX,HUANCH
+CALL JISUAN
+MOV CH,3           ;显示第三行信息
+CALL LCD_DISP
+L1:JMP START
+
+
+CLEAR PROC         ;设置CLEAR命令
+MOV AL,0CH
+MOV DX,IO_ADDRESS
+OUT DX,AL
+CALL CMD_SETUP      ;启动LCD执行命令
+RET
+CLEAR ENDP
+
+
+TRANSFORM PROC      ;启动0809
+MOV DX,280H        
+OUT DX,AL
+MOV CX,0FFH           ;有足够的时间进行转换
+AGAIN: LOOP AGAIN
+IN AL,DX             ;读取0809的值
+MOV BL,2             ;量程转换100-1000
+MOV AH,0
+MUL BL
+MOV [HUANCH+64],AX
+MOV DX,0
+MOV CX,100           ;讲转换量程后的值进行拆分，使之能在LCD屏上显示
+DIV CX
+ADD AX,0A3B0H
+MOV [HUANCH+6],AX     ;储存百位数值，显示
+MOV AX,DX
+MOV DX,0
+MOV CX,10
+DIV CX
+ADD AX,0A3B0H
+MOV [HUANCH+8],AX      ;储存十位数值，显示
+MOV AX,DX
+ADD AX,0A3B0H
+MOV [HUANCH+12],AX      ;储存个位数值至缓存区
+RET
+TRANSFORM ENDP
+
+
+FENGMINGQI PROC
+MOV DX,k8255      ;8255控制口
+MOV AL,81H          ;8255控制字 
+OUT DX,AL
+
+MOV DX,b8255     ;8255B口
+MOV AL,08H         ;向PB3输出高电平，让蜂鸣器响
+OUT DX,AL
+RET
+FENGMINGQI ENDP
+
+
+FUNCUP PROC           ;LCD显示状态命令
+MOV AL,34H
+OUT DX,AL
+CALL CMD_SETUP
+RET
+FUNCUP ENDP
+
+
+LCD_DISP PROC
+LEA BX,HUANCH
+CMP CH,1              ;判断是否是第一行
+JZ DISP_SEC1
+CMP CH,2               ;判断是否是第二行
+JZ DISP_SEC2
+CMP CH,3                 ;判断是否是第三行
+JZ DISP_SEC3
+CMP CH,4                 ;判断是否是第四行
+JZ DISP_SEC4
+MOV BYTE PTR HZ_ADR,98H     ;第四行起始端口地址
+ADD BX,48                 ;指向第四行信息
+JMP NEXT
+DISP_SEC1:
+MOV BYTE PTR HZ_ADR,80H       ;第一行起始端口地址
+ADD BX,0                        ;指向第一行信息
+JMP NEXT
+DISP_SEC2:
+MOV BYTE PTR HZ_ADR,90H         ;第二行起始端口地址
+ADD BX,16                        ;指向第二行信息
+JMP NEXT
+DISP_SEC3:
+MOV BYTE PTR HZ_ADR,88H         ;第三行起始端口地址
+ADD BX,32                        ;指向第三行信息
+JMP NEXT
+DISP_SEC4:
+MOV BYTE PTR HZ_ADR,98H          ;第四行起始端口地址
+ADD BX,48                         ;指向第四行信息
+JMP NEXT
+NEXT:
+MOV CL,8
+CONTINUE:
+PUSH CX
+MOV AL,HZ_ADR
+MOV DX,IO_ADDRESS
+OUT DX,AL
+CALL CMD_SETUP                ;设定DDRAM地址命令
+MOV AX,[BX]
+PUSH AX
+MOV AL,AH                    ;先送汉字编码高位
+MOV DX,IO_ADDRESS
+OUT DX,AL
+CALL DATA_SETUP              ;输出汉字编码高字节
+CALL DELAYTIME               ;延迟
+POP AX
+MOV DX,IO_ADDRESS
+OUT DX,AL
+CALL DATA_SETUP              ;输出汉字编码低字节
+CALL DELAYTIME
+INC BX
+INC BX                      ;修改显示内码缓冲区指针
+INC BYTE PTR HZ_ADR          ;修改LCD显示端口地址
+POP CX
+DEC CL
+JNZ CONTINUE
+RET 
+LCD_DISP ENDP
+
+
+CMD_SETUP PROC
+MOV DX,IO_ADDRESS         ;指向8255端口控制口
+ADD DX,1
+NOP 
+MOV AL,00000000B          ;PC1置0，PC0置0（LCD   I端=0，W端=0）
+OUT DX,AL
+CALL DELAYTIME
+NOP
+MOV AL,00000100B           ;PC2置1（LCD  E端=1）
+OUT DX,AL
+NOP
+CALL DELAYTIME
+MOV AL,00000000B            ;PC2置0，（LCD  E端=0）
+OUT DX,AL
+CALL DELAYTIME
+RET
+CMD_SETUP ENDP
+
+
+DATA_SETUP PROC
+MOV DX,IO_ADDRESS          ;指向8255控制端口
+ADD DX,1
+MOV AL,00000001B           ;PC1置0，PC0置1（LCD  I端=1）
+OUT DX,AL
+NOP
+CALL DELAYTIME
+MOV AL,00000101B            ;PC2置1（LCD  E端=1）
+OUT DX,AL
+NOP
+CALL DELAYTIME
+MOV AL,00000001B            ;PC2置0（LCD   E端=0）
+OUT DX,AL
+NOP
+
+
+DELAYTIME PROC               ;延时子程序
+MOV CX,0FFFFH
+D1:
+LOOP D1
+RET
+DELAYTIME ENDP
+DATA_SETUP ENDP
+
+
+JISUAN PROC
+MOV AX,[HUANCH+70]
+MOV BX,[HUANCH+64]
+MUL BX
+MOV DX,0
+MOV BX,10000
+DIV BX
+ADD AX,0A3B0H
+MOV [HUANCH+38],AX        ;价格的百位数值
+MOV AX,DX
+MOV BX,1000
+MOV DX,0
+DIV BX
+ADD AX,0A3B0H
+MOV [HUANCH+40],AX         ;价格的十位数值
+MOV AX,DX
+MOV BX,100
+MOV DX,0
+DIV BX
+ADD AX,0A3B0H
+MOV [HUANCH+42],AX        ; 价格的各位数值，其中[HUANCH+44]代表小数点
+MOV AX,DX
+MOV BX,10
+MOV DX,0
+DIV BX
+ADD AX,0A3B0H
+MOV [HUANCH+46],AX         ;价格的十分位数值
+MOV AX,DX
+RET
+JISUAN ENDP
+
+
+JIANPAN PROC
+MOV DX,k8255                ;初始化8255控制字
+MOV AL,81H
+OUT DX,AL
+KEY_LOOP:
+MOV DX,c8255
+MOV AL,0FH
+OUT DX,AL
+IN AL,DX              ;读行扫描值
+AND AL,0FH
+CMP AL,0FH
+JZ KEY_LOOP            ;未发现有键按下则转
+CALL DELAY             ;延迟一段时间
+MOV AH,AL
+MOV DX,k8255
+MOV AL,88H
+OUT DX,AL
+MOV DX,c8255
+MOV AL,AH
+OR AL,0F0H
+OUT DX,AL
+IN AL,DX            ;读列扫描值
+AND AL,0F0H
+CMP AL,0F0H
+JZ KEY_LOOP          ;未发现有键按下则转
+MOV SI,OFFSET table1     ;键盘扫描码表首地址
+MOV DI,OFFSET char     ;键盘表上所表示的字符表首地址
+MOV CX,11             ;待查表的表大小
+KEY_TONEXT:
+CMP AX,[SI]            ;每个字符的行列进行比较
+JZ KEY_FINDKEY          ;要找的字符就在表中
+DEC CX
+JZ KEY_LOOP            ;未找到对应的扫描码
+ADD SI,2
+INC DI
+JMP KEY_TONEXT
+KEY_FINDKEY:
+MOV DL,[DI]
+MOV AH,02
+INT 21H                ;显示查找到的键盘
+
+CMP CX,1     ;判断查找到的键盘是否是C
+JZ ISC       ;是C则转到全部清0子程序
+ISC:
+CALL ALL0
+
+NOT0:
+MOV BL,DL
+SUB BL,30H
+MOV [CC],BL
+KEY_WAITUP:
+MOV DX,k8255
+MOV AL,81H
+OUT DX,AL
+MOV DX,c8255
+MOV AL,0FH
+OUT DX,AL
+IN AL,DX         ;读行扫描值
+AND AL,0FH
+CMP AL,0FH
+JNZ KEY_WAITUP      ;按键未弹起则转
+CALL DELAY          ;延迟一段时间
+RET 
+JIANPAN ENDP
+
+
+DELAY PROC NEAR      ;延迟 50ms--100ms
+PUSH AX
+MOV AH,0
+INT 1AH
+MOV BX,DX
+DELAY1:
+MOV AH,0
+INT 1AH
+CMP BX,DX
+JZ DELAY1
+MOV BX,DX
+DELAY2:
+MOV AH,0
+INT 1AH
+CMP BX,DX
+JZ DELAY2
+POP AX
+RET 
+DELAY ENDP
+
+
+ALL0 PROC
+MOV AX,0
+ADD AX,0A3B0H
+MOV [HUANCH+6],AX
+MOV [HUANCH+8],AX
+MOV [HUANCH+12],AX
+LEA BX,HUANCH
+MOV CH,1               ;显示第一行
+CALL LCD_DISP
+
+MOV AX,0
+ADD AX,0A3B0H
+MOV [HUANCH+22],AX
+MOV [HUANCH+26],AX
+LEA BX,HUANCH
+MOV CH,2               ;显示第二行
+CALL LCD_DISP
+
+MOV AX,0
+ADD AX,0A3B0H
+MOV [HUANCH+38],AX
+MOV [HUANCH+40],AX
+MOV [HUANCH+42],AX
+MOV [HUANCH+46],AX
+LEA BX,HUANCH
+MOV CH,3             ;显示第三行
+CALL LCD_DISP
+ALL0 ENDP
+
+
+CODE ENDS
+END START
